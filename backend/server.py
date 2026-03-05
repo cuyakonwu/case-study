@@ -4,8 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google import genai
 import os
+import re
 import json
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
@@ -61,19 +63,49 @@ Context is the absolute truth. Use it.
 Tone: Professional, helpful, specific. Format your answers in markdown.
 """
 
+
+def extract_ps_numbers(text):
+    """Extract PS part numbers from user query."""
+    return re.findall(r'PS\d{6,}', text, re.IGNORECASE)
+
+
+def lookup_by_part_number(part_number):
+    """Direct filter lookup in Qdrant by part number."""
+    try:
+        results = qdrant_client.scroll(
+            collection_name="partselect_parts",
+            scroll_filter=Filter(
+                must=[FieldCondition(key="part_number", match=MatchValue(value=part_number))]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+        return results[0]  # returns list of points
+    except Exception as e:
+        print(f"Error in part number lookup: {e}")
+        return []
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     user_query = request.message
 
-    # 1. Embed user query
+    # 1. Check if user is asking about a specific part number
+    ps_numbers = extract_ps_numbers(user_query)
+    direct_matches = []
+    for ps_num in ps_numbers:
+        matches = lookup_by_part_number(ps_num.upper())
+        direct_matches.extend(matches)
+
+    # 2. Embed user query for semantic search
     query_vector = embedding_model.encode(user_query).tolist()
 
-    # 2. Search Qdrant
+    # 3. Semantic search in Qdrant
     try:
         query_response = qdrant_client.query_points(
             collection_name="partselect_parts",
             query=query_vector,
-            limit=5 # Fetch multiple to ensure we get a hit
+            limit=10
         )
         search_results = query_response.points
     except Exception as e:
@@ -81,47 +113,75 @@ async def chat_endpoint(request: ChatRequest):
         search_results = []
 
 
-    # 3. Compile context and extract matched parts for the frontend
+    # 4. Compile context: direct matches first, then semantic matches (deduplicated)
     context_str = ""
     suggested_parts = []
+    seen_part_numbers = set()
 
+    def add_part_to_context(payload):
+        """Helper to add a part's data to the context string and suggested parts."""
+        nonlocal context_str
+        part_number = payload.get('part_number', 'N/A')
+        if part_number in seen_part_numbers:
+            return
+        seen_part_numbers.add(part_number)
+
+        title = payload.get('title', '')
+        desc = payload.get('description', '')
+        price = payload.get('price', '')
+        compat = payload.get('compatibility', '')
+        trouble = payload.get('troubleshooting', '')
+        qna = payload.get('qna', '')
+        video = payload.get('installation_video', '')
+        url = payload.get('url', '')
+
+        context_str += f"---\nPart Number: {part_number}\nTitle: {title}\nDescription: {desc}\nPrice: {price}\nCompatibility: {compat}\nTroubleshooting: {trouble}\nQ&A: {qna}\nInstallation Video: {video}\nUrl: {url}\n"
+
+        suggested_parts.append({
+            "part_number": part_number,
+            "title": title,
+            "description": desc,
+            "url": url
+        })
+
+    # Priority 1: Direct part number matches (exact filter lookup)
+    for point in direct_matches:
+        add_part_to_context(point.payload)
+
+    # Priority 2: Semantic search results
     for hit in search_results:
-        # Lower threshold to guarantee finding the contextual mock parts even for short queries
-        if hit.score > 0.0:
-            payload = hit.payload
-            part_number = payload.get('part_number', 'N/A')
-            title = payload.get('title', '')
-            desc = payload.get('description', '')
-            compat = payload.get('compatibility', '')
-            trouble = payload.get('troubleshooting', '')
-            video = payload.get('installation_video', '')
-            url = payload.get('url', '')
+        if hit.score > 0.15:
+            add_part_to_context(hit.payload)
 
-            context_str += f"---\nPart Number: {part_number}\nTitle: {title}\nDescription: {desc}\nCompatibility: {compat}\nTroubleshooting: {trouble}\nInstallation Video: {video}\nUrl: {url}\n"
-
-            suggested_parts.append({
-                "part_number": part_number,
-                "title": title,
-                "description": desc,
-                "url": url
-            })
-
-    # Limit suggested parts returned to frontend to top 2 to not overwhelm UI
-    suggested_parts = suggested_parts[:2]
+    # Limit suggested parts returned to frontend to top 3
+    suggested_parts = suggested_parts[:3]
 
     # 4. Construct Prompt for Gemini
     full_prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context_str}\n\nUser Question: {user_query}\n\nAgent Response:"
 
-    # 5. Call Gemini
-    try:
-        response = gemini_client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=full_prompt,
-        )
-        reply_text = response.text
-    except Exception as e:
-        print(f"Gemini Error: {e}")
-        reply_text = f"I'm sorry, I'm having trouble connecting to my brain right now. ({e})"
+    # 5. Call Gemini with retry for rate limits
+    import time as _time
+    reply_text = ""
+    for attempt in range(3):
+        try:
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=full_prompt,
+            )
+            reply_text = response.text
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                wait = (attempt + 1) * 10  # 10s, 20s, 30s
+                print(f"Gemini rate limit hit. Retrying in {wait}s (attempt {attempt+1}/3)...")
+                _time.sleep(wait)
+            else:
+                print(f"Gemini Error: {e}")
+                reply_text = f"I'm sorry, I'm having trouble processing your request right now. Please try again in a moment."
+                break
+    else:
+        reply_text = "I'm sorry, the service is temporarily overloaded. Please try again in a few minutes."
 
     return ChatResponse(reply=reply_text, suggested_parts=suggested_parts)
 

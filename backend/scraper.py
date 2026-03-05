@@ -1,191 +1,337 @@
+"""
+PartSelect.com Scraper
+======================
+Scrapes comprehensive Refrigerator and Dishwasher part data directly from PartSelect.com.
+Uses curl_cffi with Chrome impersonation to bypass bot protection.
+Designed to run safely over a long period with randomized delays.
+"""
+
 import json
 import time
 import random
+import re
 import os
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 
-# This script is designed to run slowly and robustly over a long period
-# to scrape comprehensive Refrigerator and Dishwasher part data from AppliancePartsPros.
-# We will crawl the category pages to get a list of parts, then scrape each part's details.
-
-BASE_URL = "https://www.appliancepartspros.com"
+BASE_URL = "https://www.partselect.com"
 OUTPUT_FILE = "products.json"
 
-# We target specific categories for Refrigerators and Dishwashers
-CATEGORIES = [
-    # Refrigerator Categories (Examples)
-    "/refrigerator-parts.html",
-    # Dishwasher Categories
-    "/dishwasher-parts.html"
+# Main category pages
+CATEGORY_PAGES = [
+    "/Dishwasher-Parts.htm",
+    "/Refrigerator-Parts.htm",
 ]
 
+
 def get_session():
+    """Create a new curl_cffi session impersonating Chrome."""
     return requests.Session(impersonate="chrome")
 
-def extract_part_urls(html_content):
-    """Extracts individual part URLs from a category listing page."""
-    soup = BeautifulSoup(html_content, 'lxml')
-    part_links = set()
 
-    # AppliancePartsPros typically lists parts with links containing '-ap' followed by numbers
-    for a_tag in soup.find_all('a', href=True):
-        href = a_tag['href']
-        if '-ap' in href.lower() and '.html' in href.lower() and not href.startswith('#'):
-            # Ensure it's a full URL
-            if href.startswith('/'):
-                full_url = f"{BASE_URL}{href}"
-                part_links.add(full_url)
-    return list(part_links)
-
-def scrape_part_details(url, session):
-    """Scrapes the detailed information for a single part."""
-    print(f"Scraping details from: {url}")
-    try:
-        response = session.get(url, timeout=30)
-        if response.status_code != 200:
-            print(f"Failed to fetch {url}: Status {response.status_code}")
-            return None
-
-        soup = BeautifulSoup(response.text, 'lxml')
-
-        # Initialize data structure
-        data = {
-            "part_number": "",
-            "title": "",
-            "description": "",
-            "compatibility_text": "",
-            "troubleshooting_text": "",
-            "url": url,
-            "image_url": ""
-        }
-
-        # Title
-        title_el = soup.find('h1')
-        if title_el:
-            data['title'] = title_el.text.strip()
-
-        # Part Number (usually found near the title or in specific spans)
-        # Often formatted as "Item # AP6019471" or "Mfg # WPW10321304"
-        part_info_div = soup.find('div', class_='item-info') or soup.find('div', class_='part-info')
-        if part_info_div:
-            mfg_num = part_info_div.find(string=lambda text: text and 'Mfg #' in text)
-            if mfg_num:
-                data['part_number'] = mfg_num.parent.text.replace('Mfg #', '').strip()
+def safe_request(session, url, max_retries=3):
+    """Make a request with retries and error handling."""
+    for attempt in range(max_retries):
+        try:
+            response = session.get(url, timeout=30)
+            if response.status_code == 200:
+                return response
+            elif response.status_code == 403:
+                print(f"  [!] 403 Forbidden on {url}. Waiting 60s before retry...")
+                time.sleep(60)
+            elif response.status_code == 429:
+                print(f"  [!] Rate limited on {url}. Waiting 120s before retry...")
+                time.sleep(120)
             else:
-                 # Fallback to AP number from URL
-                url_parts = url.split('-')
-                ap_part = [p for p in url_parts if p.startswith('ap')]
-                if ap_part:
-                    data['part_number'] = ap_part[0].upper().replace('.HTML', '')
+                print(f"  [!] HTTP {response.status_code} on {url}")
+                return None
+        except Exception as e:
+            print(f"  [!] Request error on {url}: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(30)
+    return None
 
-        # Description
-        desc_el = soup.find('div', class_='item-description') or soup.find('p', itemprop='description')
-        if desc_el:
-            data['description'] = desc_el.text.strip()
 
-        # Troubleshooting / Q&A
-        qna_section = soup.find('div', id='questions-answers')
-        if qna_section:
-            data['troubleshooting_text'] = qna_section.text.strip()[:3000] # Limit size
+def discover_part_urls(session):
+    """
+    Phase 1: Discover part URLs from category pages and brand subcategory pages.
+    Returns a set of unique part page URLs.
+    """
+    all_part_urls = set()
+    subcategory_urls = set()
 
-        symptoms_section = soup.find('div', class_='symptoms')
-        if symptoms_section:
-             data['troubleshooting_text'] += "\n\nCommon Symptoms:\n" + symptoms_section.text.strip()
+    print("=" * 60)
+    print("PHASE 1: Discovering Part URLs")
+    print("=" * 60)
 
-        # Cross Reference / Compatibility
-        cross_ref = soup.find('div', class_='cross-reference') or soup.find('div', id='models-panel')
-        if cross_ref:
-            data['compatibility_text'] = cross_ref.text.strip()[:2000]
+    # Step 1: Crawl main category pages
+    for category_path in CATEGORY_PAGES:
+        url = f"{BASE_URL}{category_path}"
+        print(f"\nCrawling main category: {url}")
 
-        # Basic Image extraction
-        img_el = soup.find('img', itemprop='image')
-        if img_el and img_el.get('src'):
-             data['image_url'] = img_el['src']
+        response = safe_request(session, url)
+        if not response:
+            continue
 
-        # Ensure we at least got a title
-        if not data['title']:
-            return None
+        soup = BeautifulSoup(response.text, "lxml")
 
-        return data
+        # Extract part links (PS pattern)
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"]
+            # Part pages have /PS followed by digits
+            if re.match(r"^/PS\d+", href) and ".htm" in href:
+                # Strip fragment and query params for deduplication
+                clean_href = href.split("#")[0].split("?")[0]
+                full_url = f"{BASE_URL}{clean_href}"
+                all_part_urls.add(full_url)
 
-    except Exception as e:
-        print(f"Error processing {url}: {e}")
+        # Extract brand subcategory links
+        appliance_type = "Dishwasher" if "Dishwasher" in category_path else "Refrigerator"
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"]
+            if (
+                appliance_type in href
+                and "Parts.htm" in href
+                and href != category_path
+                and not href.startswith("http")
+            ):
+                subcategory_urls.add(f"{BASE_URL}{href}")
+
+        print(f"  Found {len(all_part_urls)} part URLs so far")
+        time.sleep(random.uniform(5.0, 10.0))
+
+    # Step 2: Crawl brand subcategory pages
+    print(f"\nFound {len(subcategory_urls)} brand subcategory pages to crawl")
+
+    for i, sub_url in enumerate(sorted(subcategory_urls)):
+        print(f"  [{i+1}/{len(subcategory_urls)}] Crawling: {sub_url}")
+
+        response = safe_request(session, sub_url)
+        if not response:
+            continue
+
+        soup = BeautifulSoup(response.text, "lxml")
+
+        for a_tag in soup.find_all("a", href=True):
+            href = a_tag["href"]
+            if re.match(r"^/PS\d+", href) and ".htm" in href:
+                clean_href = href.split("#")[0].split("?")[0]
+                full_url = f"{BASE_URL}{clean_href}"
+                all_part_urls.add(full_url)
+
+        print(f"    Total unique parts discovered: {len(all_part_urls)}")
+        time.sleep(random.uniform(8.0, 15.0))
+
+    print(f"\n{'=' * 60}")
+    print(f"Phase 1 Complete: {len(all_part_urls)} unique part URLs discovered")
+    print(f"{'=' * 60}\n")
+
+    return all_part_urls
+
+
+def scrape_part_page(session, url):
+    """
+    Scrape detailed information from a single PartSelect.com part page.
+    Returns a dict with part data, or None on failure.
+    """
+    response = safe_request(session, url)
+    if not response:
         return None
 
-def main():
-    print("Starting robust AppliancePartsPros scraper...")
-    session = get_session()
-    all_part_urls = set()
+    soup = BeautifulSoup(response.text, "lxml")
+    html = response.text
 
-    # Phase 1: Gather URLs from Category Pages
-    print("--- Phase 1: Gathering Part URLs ---")
-    for category in CATEGORIES:
-        category_url = f"{BASE_URL}{category}"
-        print(f"Crawling category: {category_url}")
-        try:
-            response = session.get(category_url, timeout=30)
-            if response.status_code == 200:
-                urls = extract_part_urls(response.text)
-                all_part_urls.update(urls)
-                print(f"Found {len(urls)} part URLs in this category.")
-            else:
-                 print(f"Failed to load category {category_url}: {response.status_code}")
-        except Exception as e:
-            print(f"Error crawling {category_url}: {e}")
+    data = {
+        "part_number": "",
+        "title": "",
+        "description": "",
+        "price": "",
+        "compatibility_text": "",
+        "troubleshooting_text": "",
+        "qna_text": "",
+        "installation_video": "",
+        "url": url,
+    }
 
-        # Polite delay between category pages
-        time.sleep(random.uniform(3.0, 7.0))
+    # --- Title ---
+    h1 = soup.find("h1")
+    if h1:
+        data["title"] = h1.text.strip()
 
-    all_part_urls = list(all_part_urls)[:200] # Limit to 200 parts for the case study scope to ensure it completes reasonably, adjust if needed
-    print(f"Total unique part URLs gathered: {len(all_part_urls)}. Preparing to scrape details.")
+    # --- PS Part Number (from URL) ---
+    ps_match = re.search(r"PS(\d+)", url)
+    if ps_match:
+        data["part_number"] = f"PS{ps_match.group(1)}"
 
-    # Phase 2: Scrape Details
-    print("\n--- Phase 2: Scraping Part Details ---")
+    # --- Description ---
+    desc_section = soup.find("div", class_="pd__description")
+    if not desc_section:
+        # Fallback: look for the h2 that says "Specifications" and get the text after it
+        for h2 in soup.find_all("h2"):
+            if "Specifications" in h2.text:
+                desc_section = h2.parent
+                break
+    if desc_section:
+        data["description"] = desc_section.get_text(separator=" ", strip=True)[:2000]
 
-    # Load existing data to resume if interrupted
-    scraped_data = []
+    # --- Price ---
+    price_el = soup.find("span", class_="price")
+    if price_el:
+        price_text = price_el.get_text(strip=True)
+        # Extract just the dollar amount
+        price_match = re.search(r"\$[\d,.]+", price_text)
+        if price_match:
+            data["price"] = price_match.group(0)
+
+    # --- Q&A Content ---
+    qna_div = soup.find("div", id="QuestionsAndAnswersContent")
+    if qna_div:
+        # Get all the readable Q&A text
+        qna_text = qna_div.get_text(separator="\n", strip=True)
+        data["qna_text"] = qna_text[:5000]  # Cap at 5000 chars
+
+    # --- Compatible Models ---
+    # Look for model numbers mentioned in the page
+    # PartSelect pages often list compatible models in various sections
+    model_numbers = set()
+
+    # Check for a models section
+    models_section = soup.find("div", id="ModelsList") or soup.find(
+        "div", class_="pd__models"
+    )
+    if models_section:
+        data["compatibility_text"] = models_section.get_text(
+            separator=" ", strip=True
+        )[:3000]
+    else:
+        # Extract model numbers from the whole page using pattern matching
+        # Common appliance model patterns: letters followed by digits and sometimes more letters
+        model_pattern = re.findall(
+            r"\b[A-Z]{2,5}\d{3,}[A-Z0-9]*\b", html[:100000]
+        )
+        # Filter to likely model numbers (longer than 7 chars, not PS numbers)
+        models = set(
+            m for m in model_pattern if len(m) > 7 and not m.startswith("PS")
+        )
+        if models:
+            data["compatibility_text"] = (
+                "Compatible models include: " + ", ".join(list(models)[:50])
+            )
+
+    # --- YouTube Videos ---
+    youtube_ids = re.findall(r"youtube\.com/embed/([a-zA-Z0-9_-]+)", html)
+    if youtube_ids:
+        data["installation_video"] = (
+            f"https://www.youtube.com/watch?v={youtube_ids[0]}"
+        )
+
+    # --- Troubleshooting / Symptoms ---
+    # Look for symptoms or troubleshooting sections
+    for section_id in ["Troubleshooting", "Symptoms", "PartSymptoms"]:
+        section = soup.find("div", id=section_id) or soup.find(
+            "section", id=section_id
+        )
+        if section:
+            data["troubleshooting_text"] = section.get_text(
+                separator="\n", strip=True
+            )[:3000]
+            break
+
+    # Ensure we at least got a title
+    if not data["title"]:
+        return None
+
+    return data
+
+
+def load_existing_data():
+    """Load previously scraped data for resume support."""
     if os.path.exists(OUTPUT_FILE):
         try:
-            with open(OUTPUT_FILE, 'r') as f:
-                scraped_data = json.load(f)
-                print(f"Loaded {len(scraped_data)} previously scraped parts.")
-        except json.JSONDecodeError:
-            print("Warning: Could not parse existing products.json, starting fresh.")
+            with open(OUTPUT_FILE, "r") as f:
+                data = json.load(f)
+                print(f"Loaded {len(data)} previously scraped parts from {OUTPUT_FILE}")
+                return data
+        except (json.JSONDecodeError, IOError):
+            print(f"Warning: Could not parse {OUTPUT_FILE}, starting fresh.")
+    return []
 
-    scraped_urls = {item['url'] for item in scraped_data}
 
-    successful_scrapes = 0
+def save_data(data):
+    """Save data to JSON file."""
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def main():
+    print("=" * 60)
+    print("PartSelect.com Comprehensive Scraper")
+    print("Targeting: Refrigerator + Dishwasher Parts")
+    print("=" * 60)
+
+    session = get_session()
+
+    # Phase 1: Discover URLs
+    all_part_urls = discover_part_urls(session)
+
+    # Convert to sorted list for deterministic ordering
+    all_part_urls = sorted(all_part_urls)
+    print(f"Will scrape up to {len(all_part_urls)} part pages\n")
+
+    # Phase 2: Scrape Details
+    print("=" * 60)
+    print("PHASE 2: Scraping Part Details")
+    print("=" * 60)
+
+    scraped_data = load_existing_data()
+    scraped_urls = {item["url"] for item in scraped_data}
+
+    successful = 0
+    skipped = 0
+    failed = 0
 
     for i, url in enumerate(all_part_urls):
         if url in scraped_urls:
-             print(f"Skipping {url} (already scraped)")
-             continue
+            skipped += 1
+            continue
 
-        print(f"[{i+1}/{len(all_part_urls)}]")
-        part_data = scrape_part_details(url, session)
+        print(f"\n[{i+1}/{len(all_part_urls)}] Scraping: {url}")
+        part_data = scrape_part_page(session, url)
 
         if part_data:
             scraped_data.append(part_data)
-            successful_scrapes += 1
             scraped_urls.add(url)
+            successful += 1
+            print(
+                f"  ✓ {part_data['part_number']} - {part_data['title'][:60]}"
+            )
 
-            # Save incrementally very often in case of crashes/bans
-            if successful_scrapes % 5 == 0:
-                with open(OUTPUT_FILE, 'w') as f:
-                    json.dump(scraped_data, f, indent=4)
-                print(f">>> Incrementally saved {len(scraped_data)} parts to {OUTPUT_FILE}")
+            # Save incrementally every 5 successful scrapes
+            if successful % 5 == 0:
+                save_data(scraped_data)
+                print(
+                    f"  >>> Saved {len(scraped_data)} total parts to {OUTPUT_FILE}"
+                )
+        else:
+            failed += 1
+            print(f"  ✗ Failed to extract data")
 
-        # Critical: Random, long delays to prevent IP bans.
-        # The user requested safety over speed.
-        delay = random.uniform(5.0, 15.0)
-        print(f"Sleeping for {delay:.2f} seconds to avoid IP ban...")
+        # Randomized delay to avoid IP bans (8-20 seconds)
+        delay = random.uniform(8.0, 20.0)
+        print(f"  Sleeping {delay:.1f}s...")
         time.sleep(delay)
 
-    # Final Save
-    with open(OUTPUT_FILE, 'w') as f:
-        json.dump(scraped_data, f, indent=4)
-    print(f"\nScraping complete! Successfully gathered {len(scraped_data)} total parts.")
+    # Final save
+    save_data(scraped_data)
+
+    print(f"\n{'=' * 60}")
+    print(f"Scraping Complete!")
+    print(f"  Total parts in database: {len(scraped_data)}")
+    print(f"  New parts scraped: {successful}")
+    print(f"  Skipped (already scraped): {skipped}")
+    print(f"  Failed: {failed}")
+    print(f"{'=' * 60}")
+
 
 if __name__ == "__main__":
     main()

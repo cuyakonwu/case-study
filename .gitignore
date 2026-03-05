@@ -1,3 +1,9 @@
+node_modules/
+build/
+__pycache__/
+*.pyc
+backend/venv/
+backend/__pycache__/
+.env
 instructions.txt
 walkthrough.md
-.env
