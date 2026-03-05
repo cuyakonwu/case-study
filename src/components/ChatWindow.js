@@ -7,20 +7,20 @@ function ChatWindow() {
 
   const defaultMessage = [{
     role: "assistant",
-    content: "Hi, how can I help you today?"
+    content: "Hi! I'm your PartSelect assistant. Are you looking for a specific Refrigerator or Dishwasher part, or do you need help troubleshooting an issue?"
   }];
 
-  const [messages,setMessages] = useState(defaultMessage)
+  const [messages, setMessages] = useState(defaultMessage)
   const [input, setInput] = useState("");
 
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-      scrollToBottom();
+    scrollToBottom();
   }, [messages]);
 
   const handleSend = async (input) => {
@@ -36,36 +36,49 @@ function ChatWindow() {
   };
 
   return (
-      <div className="messages-container">
-          {messages.map((message, index) => (
-              <div key={index} className={`${message.role}-message-container`}>
-                  {message.content && (
-                      <div className={`message ${message.role}-message`}>
-                          <div dangerouslySetInnerHTML={{__html: marked(message.content).replace(/<p>|<\/p>/g, "")}}></div>
-                      </div>
-                  )}
-              </div>
-          ))}
-          <div ref={messagesEndRef} />
-          <div className="input-area">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Type a message..."
-              onKeyPress={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  handleSend(input);
-                  e.preventDefault();
-                }
-              }}
-              rows="3"
-            />
-            <button className="send-button" onClick={handleSend}>
-              Send
-            </button>
-          </div>
+    <div className="messages-container">
+      {messages.map((message, index) => (
+        <div key={index} className={`${message.role}-message-container`}>
+          {message.content && (
+            <div className={`message ${message.role}-message`}>
+              <div dangerouslySetInnerHTML={{ __html: marked(message.content).replace(/<p>|<\/p>/g, "") }}></div>
+              {message.suggested_parts && message.suggested_parts.length > 0 && (
+                <div className="suggested-parts-container">
+                  <p className="suggested-parts-title">Recommended Parts:</p>
+                  {message.suggested_parts.map((part, pIndex) => (
+                    <a key={pIndex} href={part.url} target="_blank" rel="noopener noreferrer" className="part-card">
+                      <div className="part-card-title">{part.title}</div>
+                      <div className="part-card-number">Part No: {part.part_number}</div>
+                      <div className="part-card-desc">{part.description.substring(0, 100)}...</div>
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+      <div ref={messagesEndRef} />
+      <div className="input-area">
+        <div className="input-area-inner">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type a message..."
+            onKeyPress={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                handleSend(input);
+                e.preventDefault();
+              }
+            }}
+          />
+          <button className="send-button" onClick={() => handleSend(input)}>
+            Send
+          </button>
+        </div>
       </div>
-);
+    </div>
+  );
 }
 
 export default ChatWindow;
