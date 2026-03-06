@@ -50,7 +50,7 @@ except Exception as e:
     print(f"Error initializing models/db: {e}")
 
 SYSTEM_PROMPT = """You are a helpful and expert customer support agent for PartSelect.com.
-You ONLY answer questions about Refrigerator and Dishwasher appliances and their replacement parts.
+You help customers find the right replacement parts and provide installation or troubleshooting advice based on the provided context.
 
 CRITICAL INSTRUCTIONS:
 1. DO NOT direct the user to go to the PartSelect.com website to check compatibility or find manuals. YOU MUST ANSWER THEIR QUESTION DIRECTLY IN THE CHAT using the provided context.
@@ -182,6 +182,11 @@ async def chat_endpoint(request: ChatRequest):
                 break
     else:
         reply_text = "I'm sorry, the service is temporarily overloaded. Please try again in a few minutes."
+
+    # 6. Post-process to clear parts for off-topic queries
+    if reply_text.strip().startswith("[OFF_TOPIC]"):
+        reply_text = reply_text.replace("[OFF_TOPIC]", "").strip()
+        suggested_parts = []
 
     return ChatResponse(reply=reply_text, suggested_parts=suggested_parts)
 
