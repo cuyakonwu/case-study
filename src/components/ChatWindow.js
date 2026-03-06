@@ -44,7 +44,7 @@ function ChatWindow() {
         <div key={index} className={`${message.role}-message-container`}>
           {message.content && (
             <div className={`message ${message.role}-message`}>
-              <div dangerouslySetInnerHTML={{ __html: marked(message.content).replace(/<p>|<\/p>/g, "") }}></div>
+              <div dangerouslySetInnerHTML={{ __html: marked(message.content) }}></div>
               {message.suggested_parts && message.suggested_parts.length > 0 && (
                 <div className="suggested-parts-container">
                   <p className="suggested-parts-title">Recommended Parts:</p>
@@ -53,6 +53,21 @@ function ChatWindow() {
                       <div className="part-card-title">{part.title}</div>
                       <div className="part-card-number">Part No: {part.part_number}</div>
                       <div className="part-card-desc">{part.description.substring(0, 100)}...</div>
+
+                      {part.installation_video && (
+                        <div className="part-video-container" style={{ marginTop: "10px" }} onClick={(e) => e.stopPropagation()}>
+                          <iframe
+                            width="100%"
+                            height="180"
+                            src={part.installation_video.replace("watch?v=", "embed/")}
+                            title="YouTube Installation Video"
+                            frameBorder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            style={{ borderRadius: "6px" }}
+                          ></iframe>
+                        </div>
+                      )}
                     </a>
                   ))}
                 </div>
