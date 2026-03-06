@@ -7,9 +7,9 @@ function App() {
   return (
     <div className="App">
       <div className="heading">
-        Instalily Case Study
+        PartSelect Support
       </div>
-        <ChatWindow/>
+      <ChatWindow />
     </div>
   );
 }

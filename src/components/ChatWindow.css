@@ -48,7 +48,7 @@
 .user-message {
   align-self: flex-end;
   font-size: 13px;
-  background-color: #1b3875;
+  background-color: #337778;
   color: #ffffff;
   border-top-right-radius: 0;
   text-align: left;
@@ -100,7 +100,7 @@
 }
 
 .input-area input:focus {
-  border-color: #1b3875;
+  border-color: #337778;
 }
 
 .input-area input {
@@ -116,14 +116,16 @@
   padding: 10px 20px;
   border: none;
   border-radius: 5px;
-  background-color: #1b3875;
+  background-color: #ff9933;
+  font-weight: 600;
   color: white;
   cursor: pointer;
   font-size: 13px;
+  transition: background-color 0.2s;
 }
 
 .input-area button:hover {
-  background-color: #132857;
+  background-color: #e68a2e;
 }
 
 /* Suggested Parts Styling */
@@ -137,7 +139,7 @@
 .suggested-parts-title {
   font-weight: 600;
   margin-bottom: 0px;
-  color: #1b3875;
+  color: #337778;
 }
 
 .part-card {
@@ -152,14 +154,14 @@
 }
 
 .part-card:hover {
-  box-shadow: 0 4px 12px rgba(27, 56, 117, 0.15);
-  border-color: #1b3875;
+  box-shadow: 0 4px 12px rgba(51, 119, 120, 0.15);
+  border-color: #337778;
   transform: translateY(-2px);
 }
 
 .part-card-title {
   font-weight: 600;
-  color: #1b3875;
+  color: #337778;
   margin-bottom: 4px;
   font-size: 14px;
 }
