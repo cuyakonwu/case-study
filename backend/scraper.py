@@ -220,11 +220,16 @@ def scrape_part_page(session, url):
             )
 
     # --- YouTube Videos ---
-    youtube_ids = re.findall(r"youtube\.com/embed/([a-zA-Z0-9_-]+)", html)
+    youtube_ids = re.findall(r"img\.youtube\.com/vi/([a-zA-Z0-9_-]+)", html)
     if youtube_ids:
-        data["installation_video"] = (
-            f"https://www.youtube.com/watch?v={youtube_ids[0]}"
-        )
+        video_id = youtube_ids[0]
+        for vid in youtube_ids:
+            if vid != 'd6AvOkulk_g':  # Ignore generic 'Buying OEM parts' promo video
+                video_id = vid
+                break
+
+        if video_id != 'd6AvOkulk_g':
+            data["installation_video"] = f"https://www.youtube.com/watch?v={video_id}"
 
     # --- Troubleshooting / Symptoms ---
     # Look for symptoms or troubleshooting sections
