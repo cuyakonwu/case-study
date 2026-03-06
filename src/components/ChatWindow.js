@@ -32,7 +32,7 @@ function ChatWindow() {
 
       // Call API & set assistant message
       setIsLoading(true);
-      const newMessage = await getAIMessage(input);
+      const newMessage = await getAIMessage(input, messages);
       setMessages(prevMessages => [...prevMessages, newMessage]);
       setIsLoading(false);
     }

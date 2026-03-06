@@ -2,6 +2,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
 from google import genai
 import os
 import re
@@ -30,8 +31,13 @@ if not api_key:
 # Set up Gemini
 gemini_client = genai.Client(api_key=api_key)
 
+class Message(BaseModel):
+    role: str
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
+    history: Optional[List[Message]] = []
 
 class ChatResponse(BaseModel):
     reply: str
@@ -157,7 +163,15 @@ async def chat_endpoint(request: ChatRequest):
     suggested_parts = suggested_parts[:3]
 
     # 4. Construct Prompt for Gemini
-    full_prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context_str}\n\nUser Question: {user_query}\n\nAgent Response:"
+    history_str = ""
+    if request.history:
+        history_str = "Conversation History:\n"
+        # Take the last 6 messages (3 turns)
+        for msg in request.history[-6:]:
+            history_str += f"{msg.role.capitalize()}: {msg.content}\n"
+        history_str += "\n"
+
+    full_prompt = f"{SYSTEM_PROMPT}\n\n{history_str}Context (from database for the latest query):\n{context_str}\n\nUser Question: {user_query}\n\nAgent Response:"
 
     # 5. Call Gemini with retry for rate limits
     import time as _time

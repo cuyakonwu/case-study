@@ -1,12 +1,15 @@
 
-export const getAIMessage = async (userQuery) => {
+export const getAIMessage = async (userQuery, history = []) => {
   try {
     const response = await fetch("http://localhost:8000/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message: userQuery }),
+      body: JSON.stringify({
+        message: userQuery,
+        history: history.map(m => ({ role: m.role, content: m.content }))
+      }),
     });
 
     if (!response.ok) {
