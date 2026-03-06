@@ -96,8 +96,11 @@ def lookup_by_part_number(part_number):
 async def chat_endpoint(request: ChatRequest):
     user_query = request.message
 
-    # 1. Check if user is asking about a specific part number
-    ps_numbers = extract_ps_numbers(user_query)
+    # 1. Check if user is asking about a specific part number (including recent history)
+    history_text = " ".join([m.content for m in request.history[-4:]]) if request.history else ""
+    combined_query_for_extraction = f"{user_query} {history_text}"
+    ps_numbers = list(set(extract_ps_numbers(combined_query_for_extraction)))
+
     direct_matches = []
     for ps_num in ps_numbers:
         matches = lookup_by_part_number(ps_num.upper())
