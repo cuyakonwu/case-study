@@ -173,7 +173,7 @@ async def chat_endpoint(request: ChatRequest):
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                wait = (attempt + 1) * 10  # 10s, 20s, 30s
+                wait = 2 ** attempt  # 1s, 2s, 4s
                 print(f"Gemini rate limit hit. Retrying in {wait}s (attempt {attempt+1}/3)...")
                 _time.sleep(wait)
             else:

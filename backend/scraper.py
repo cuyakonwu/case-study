@@ -188,7 +188,8 @@ def scrape_part_page(session, url):
     if qna_div:
         # Get all the readable Q&A text
         qna_text = qna_div.get_text(separator="\n", strip=True)
-        data["qna_text"] = qna_text[:5000]  # Cap at 5000 chars
+        if "Q&A experts are temporarily unavailable" not in qna_text:
+            data["qna_text"] = qna_text[:5000]  # Cap at 5000 chars
 
     # --- Compatible Models ---
     # Look for model numbers mentioned in the page
