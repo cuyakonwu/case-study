@@ -12,6 +12,7 @@ function ChatWindow() {
 
   const [messages, setMessages] = useState(defaultMessage)
   const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const messagesEndRef = useRef(null);
 
@@ -30,8 +31,10 @@ function ChatWindow() {
       setInput("");
 
       // Call API & set assistant message
+      setIsLoading(true);
       const newMessage = await getAIMessage(input);
       setMessages(prevMessages => [...prevMessages, newMessage]);
+      setIsLoading(false);
     }
   };
 
@@ -58,6 +61,17 @@ function ChatWindow() {
           )}
         </div>
       ))}
+
+      {isLoading && (
+        <div className="assistant-message-container">
+          <div className="message assistant-message typing-indicator">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      )}
+
       <div ref={messagesEndRef} />
       <div className="input-area">
         <div className="input-area-inner">
